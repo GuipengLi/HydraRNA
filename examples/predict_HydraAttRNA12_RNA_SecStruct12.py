@@ -282,8 +282,7 @@ test_list = ['bpRNA']
 
 for celldir in test_list:
     celltype= celldir
-    #ds_valid = SecondaryStructureDataset('RiNALMo/data/bpRNA/valid') 
-    ds_test = SecondaryStructureDataset('RiNALMo/data/bpRNA/test') 
+    ds_test = SecondaryStructureDataset('../data/bpRNA/test') 
     print(celltype)
     
     #valid_loader = DataLoader(ds_valid, shuffle=False, batch_size=1)
@@ -291,7 +290,7 @@ for celldir in test_list:
 
     models, _model_args = checkpoint_utils.load_model_ensemble([path], task=task)
     model =  hybridSecStruct( input_dim, hidden_dim, output_dim)
-    model.load_state_dict(torch.load("weights/model_finetune_HydraAttRNA12_RNASecStruct12_128_kernel7_best.pt"))
+    model.load_state_dict(torch.load("../weights/HydraRNA_SS_model.pt"))
  
     model.to(device)
     print(model)
