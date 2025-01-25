@@ -1,9 +1,9 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) 2025, Guipeng Li
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 """
-HydraRNA.
+HydraRNA
 """
 
 import logging
@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+
+from einops import rearrange, repeat
 
 from fairseq import utils
 from fairseq.models import (
@@ -27,12 +29,13 @@ from fairseq.modules.transformer_sentence_encoder import init_bert_params
 from fairseq.utils import safe_getattr, safe_hasattr
 
 ########
+#from mamba_ssm.ops.triton.layernorm_gated import RMSNorm
 
-from mamba_ssm.ops.triton.layernorm_gated import RMSNorm
+#from mamba_ssm import Mamba2
 
-from mamba_ssm import Mamba2
+from .mha import MHA , FeedforwardNN
 
-from .mha import MHA
+
 from .hydra import Hydra
 
 
@@ -41,6 +44,59 @@ from fairseq.modules import PositionalEmbedding
 
 logger = logging.getLogger(__name__)
 
+
+class Attention(nn.Module):
+    """Implement the scaled dot product attention with softmax.
+    Arguments
+    ---------
+        softmax_scale: The temperature to use for the softmax attention.
+                      (default: 1/sqrt(d_keys) where d_keys is computed at
+                      runtime)
+        attention_dropout: The dropout rate to apply to the attention
+                           (default: 0.0)
+    """
+
+    def __init__(self, causal=False, softmax_scale=None, attention_dropout=0.0):
+        super().__init__()
+        self.causal = causal
+        self.softmax_scale = softmax_scale
+        self.drop = nn.Dropout(attention_dropout)
+
+    def forward(self, qkv, causal=None, key_padding_mask=None):
+        """Implements the multihead softmax attention.
+        Arguments
+        ---------
+            qkv: The tensor containing the query, key, and value. (B, S, 3, H, D)
+            causal: if passed, will override self.causal
+            key_padding_mask: boolean mask to apply to the attention weights. True means to keep,
+                False means to mask out. (B, S)
+        """
+        batch_size, seqlen = qkv.shape[0], qkv.shape[1]
+        causal = self.causal if causal is None else causal
+        q, k, v = qkv.unbind(dim=2)
+        softmax_scale = self.softmax_scale or 1.0 / math.sqrt(q.shape[-1])
+        scores = torch.einsum("bthd,bshd->bhts", q, k * softmax_scale)
+
+        if key_padding_mask is not None:
+            padding_mask = torch.full(
+                (batch_size, seqlen), -10000.0, dtype=scores.dtype, device=scores.device
+            )
+            padding_mask.masked_fill_(key_padding_mask, 0.0)
+            # TD [2022-09-30]: Adding is faster than masked_fill_ (idk why, just better kernel I guess)
+            scores = scores + rearrange(padding_mask, "b s -> b 1 1 s")
+        if causal:
+            # "triu_tril_cuda_template" not implemented for 'BFloat16'
+            # So we have to construct the mask in float
+            causal_mask = torch.triu(
+                torch.full((seqlen, seqlen), -10000.0, device=scores.device), 1
+            )
+            # TD [2022-09-30]: Adding is faster than masked_fill_ (idk why, just better kernel I guess)
+            scores = scores + causal_mask.to(dtype=scores.dtype)
+        attention = torch.softmax(scores, dim=-1, dtype=v.dtype)
+        #attention_drop = self.drop(attention)
+        #output = torch.einsum("bhts,bshd->bthd", attention_drop, v)
+        #return output
+        return attention
 
 @register_model("HydraAttRNA")
 class HydraAttRNAModel(FairseqEncoderModel):
@@ -127,7 +183,11 @@ class HydraAttRNAModel(FairseqEncoderModel):
             action="store_true",
             help="(re-)register and load heads when loading checkpoints",
         )
-
+        parser.add_argument(
+            "--untie-weights-roberta",
+            action="store_true",
+            help="Untie weights between embeddings and classifiers in RoBERTa",
+        )
         # args for "Reducing Transformer Depth on Demand with Structured Dropout" (Fan et al., 2019)
         parser.add_argument(
             "--encoder-layerdrop",
@@ -544,27 +604,30 @@ class HydraAttRNAEncoder(FairseqEncoder):
         #        dictionary.pad()
         #    )
         self.embed_positions = None
+        #self.rotary_emb = RotaryEmbedding(
+        #    args.encoder_embed_dim // 16 // 2,  # head_dim
+        #    base=10000.0,
+        #    interleaved=True,
+        #)
 
         self.layernorm_embedding = LayerNorm( args.encoder_embed_dim )
+
+        for i in dictionary.symbols:
+            print(i, dictionary.index(i) )
 
     def build_embedding(self, vocab_size, embedding_dim, padding_idx):
         return nn.Embedding(vocab_size, embedding_dim, padding_idx)
 
     def build_encoder(self, args, dictionary ):
-        #config = Mamba2Config(d_model= args.encoder_embed_dim, n_layer = args.n_layer, chunk_size=64,   vocab_size = len(dictionary) , pad_vocab_size_multiple=1 )
-        #print( config)
-        #encoder = Mamba2( config) # single layer
         encoder = nn.ModuleDict(
             dict(
                 layers=nn.ModuleList(
                     [
                         nn.ModuleDict(
                             dict(
-                                #mixer=Mamba2( d_model=args.encoder_embed_dim ),
-                                #mixer=BiMamba2( d_model=args.encoder_embed_dim ), # not stable
-                                mixer=Hydra( d_model=args.encoder_embed_dim, learnable_init_states=True, bias=True , use_mem_eff_path=True),  # 4X slower
+                                #mixer=Hydra( d_model=args.encoder_embed_dim, learnable_init_states=True, bias=True , use_mem_eff_path=True),  # 4X slower
+                                mixer=Hydra( d_model=args.encoder_embed_dim, learnable_init_states=True, bias=False , use_mem_eff_path=True),  # 4X slower
                                 norm=LayerNorm(args.encoder_embed_dim ),
-                                #norm=RMSNorm(args.encoder_embed_dim ),
                             )
                         )
                         #if i not in [ 5,11,17,23 ]
@@ -573,7 +636,7 @@ class HydraAttRNAEncoder(FairseqEncoder):
                         else
                         nn.ModuleDict(
                             dict(
-                                mixer=MHA( embed_dim=args.encoder_embed_dim, num_heads=16, rotary_emb_dim=16,  use_flash_attn=True, fused_bias_fc=True ),
+                                mixer=MHA( embed_dim=args.encoder_embed_dim, depth=i, num_heads=16, rotary_emb_dim=64, rotary_emb_interleaved=True,  use_flash_attn=True, fused_bias_fc=True ),
                                 norm=LayerNorm(args.encoder_embed_dim ),
                             )
                         )
@@ -637,34 +700,30 @@ class HydraAttRNAEncoder(FairseqEncoder):
 
     def extract_features(self, src_tokens, return_all_hiddens=False, **kwargs):
 
+        #print( src_tokens)
+        #print( src_tokens.shape)
         x, embed = self.forward_embedding( src_tokens )
-        #print ( src_tokens, src_tokens.shape, x.shape, embed.shape)
+        #x = x.to(torch.float16 ) # flash_attn require float16
+        #print( x.shape) #batch, len, embed_dim
+        #print ( src_tokens.shape, x.shape, embed.shape)
+        #self.rotary_emb._update_cos_sin_cache( self.max_positions(), device=x.device,  dtype= x.dtype)
+        #rel_pos = ( self.rotary_emb._cos_cached, self.rotary_emb._sin_cached)
         # compute padding mask
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
         has_pads = encoder_padding_mask.any()
         tmp = 1 - encoder_padding_mask.unsqueeze(-1).type_as(x) * has_pads.type_as(x)  
+        #print(tmp.shape)
         #encoder_out = self.sentence_encoder( x )
         for i, layer in enumerate(self.backbone.layers):
             #y = layer.norm(layer.mixer(x) )
+            #y =  layer.mixer(layer.norm(x) )
             y =  layer.mixer(layer.norm(x) )
+            #y =  layer.ffn(layer.mixer(layer.norm(x), rel_pos ))
             x = y + x
             #y =  F.silu(layer.mixer(layer.norm(x) ))
             #x = 1.0/math.sqrt(i+1)*y + x
             x = x * tmp  # account for padding while computing the representation
         x = self.backbone.norm_f(x)
-
-        ## reverse sequence
-        #src_tokens2 = torch.flip(src_tokens, [1])
-        #x2, embed2 = self.forward_embedding( src_tokens2 )
-        #encoder_padding_mask2 = src_tokens2.eq(self.padding_idx)
-        #has_pads2 = encoder_padding_mask2.any()
-        #for i, layer in enumerate(self.backbone.layers):
-        #    #y = layer.norm(layer.mixer(x) )
-        #    y = layer.mixer(layer.norm(x2) )
-        #    x2 = y + x2
-        #    x2 = x2 * ( 1 - encoder_padding_mask2.unsqueeze(-1).type_as(x2) * has_pads2.type_as(x2)   ) # account for padding while computing the representation
-        #x2 = self.backbone.norm_f(x2)
-        #x2 = torch.flip( x2, [1])        
 
         #print ( x.shape, encoder_out)
         # T x B x C -> B x T x C
@@ -675,6 +734,31 @@ class HydraAttRNAEncoder(FairseqEncoder):
         #inner_states = encoder_out["encoder_states"] if return_all_hiddens else None
         inner_states = None
         return features, {"inner_states": inner_states}
+
+    def extract_features_Attn(self, src_tokens, return_all_hiddens=False, **kwargs):
+
+        Myattn = Attention()
+        x, embed = self.forward_embedding( src_tokens )
+        encoder_padding_mask = src_tokens.eq(self.padding_idx)
+        has_pads = encoder_padding_mask.any()
+        tmp = 1 - encoder_padding_mask.unsqueeze(-1).type_as(x) * has_pads.type_as(x)
+        n = len(self.backbone.layers)
+        for i, layer in enumerate(self.backbone.layers):
+            y =  layer.mixer(layer.norm(x) )
+            if i == n-1:
+                qkv = layer.mixer.Wqkv( layer.norm(x) )
+                qkv = rearrange(qkv, "... (three h d) -> ... three h d", three=3, d=layer.mixer.head_dim)
+                qkv = layer.mixer.rotary_emb( qkv )
+                attn = Myattn( qkv.detach()) # b, head_dim, len ,len
+                attn = attn.mean(dim=1)
+                #print( qkv.shape, attn.shape)
+            x = y + x
+            x = x * tmp  # account for padding while computing the representation
+        x = self.backbone.norm_f(x)
+
+        features = x
+        inner_states = None
+        return features, {"inner_states": inner_states, "attention": attn}
 
     def output_layer(self, features, masked_tokens=None, **unused):
         return self.lm_head(features, masked_tokens)
@@ -710,7 +794,7 @@ def base_architecture(args):
         args, "encoder_normalize_before", False
     )
     args.pooler_activation_fn = safe_getattr(args, "pooler_activation_fn", "tanh")
-
+    args.untie_weights_roberta = safe_getattr(args, "untie_weights_roberta", False)
 
     # Adaptive input config
     args.adaptive_input = safe_getattr(args, "adaptive_input", False)
@@ -739,54 +823,12 @@ def HydraRNA_base_architecture(args):
 
 
 
-
-@register_model_architecture("HydraAttRNA", "HydraAttRNA24")
-def xlm_architecture(args):
-    args.n_layer = safe_getattr(args, "n_layer", 24)
-    args.Att_layers = safe_getattr(args, "Att_layers", [24] )
-    args.encoder_embed_dim = safe_getattr(args, "encoder_embed_dim", 768)
-    args.max_positions = safe_getattr(args, "max_positions", 2050)
-    base_architecture(args)
-
-@register_model_architecture("HydraAttRNA", "HydraRNA24")
-def xlm_architecture(args):
-    args.n_layer = safe_getattr(args, "n_layer", 24)
-    args.Att_layers = safe_getattr(args, "Att_layers", [] )
-    args.encoder_embed_dim = safe_getattr(args, "encoder_embed_dim", 768)
-    args.max_positions = safe_getattr(args, "max_positions", 2050)
-    base_architecture(args)
-
-@register_model_architecture("HydraAttRNA", "HydraRNA18")
-def xlm_architecture(args):
-    args.n_layer = 18
-    args.Att_layers = [] 
-    args.encoder_embed_dim = 768
-    args.max_positions = 10242
-    args.tokens_per_sample = args.max_positions
-    base_architecture(args)
-
-
-@register_model_architecture("HydraAttRNA", "FARNA24")
-def xlm_architecture(args):
-    args.n_layer = safe_getattr(args, "n_layer", 24)
-    args.Att_layers = safe_getattr(args, "Att_layers", [0,1,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,23 ] )
-    args.encoder_embed_dim = safe_getattr(args, "encoder_embed_dim", 1024)
-    args.max_positions = safe_getattr(args, "max_positions", 1026)
-    base_architecture(args)
-
-@register_model_architecture("HydraAttRNA", "FARNA12")
-def xlm_architecture(args):
-    args.n_layer = safe_getattr(args, "n_layer", 12)
-    args.Att_layers = safe_getattr(args, "Att_layers", [0,1,2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ] )
-    args.encoder_embed_dim = safe_getattr(args, "encoder_embed_dim", 1024)
-    args.max_positions = safe_getattr(args, "max_positions", 1026)
-    base_architecture(args)
-
 @register_model_architecture("HydraAttRNA", "HydraAttRNA12")
 def xlm_architecture(args):
     args.n_layer = safe_getattr(args, "n_layer", 12)
     args.Att_layers = safe_getattr(args, "Att_layers", [ 5,11  ] )
     args.encoder_embed_dim = safe_getattr(args, "encoder_embed_dim", 1024)
-    args.max_positions = safe_getattr(args, "max_positions", 1026)
+    args.max_positions = safe_getattr(args, "max_positions", 10242)
+    args.tokens_per_sample = args.max_positions
     base_architecture(args)
 

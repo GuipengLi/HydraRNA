@@ -10,6 +10,10 @@ from einops import rearrange, repeat
 
 from flash_attn.utils.distributed import get_dim_for_local_rank
 
+from .flashdiff2 import FlashDiffAttention
+#from .multihead_flashdiff_2x import FlashDiffAttention
+
+
 try:
     from flash_attn import (
         flash_attn_kvpacked_func,
@@ -402,6 +406,7 @@ class MHA(nn.Module):
         self,
         embed_dim,
         num_heads,
+        depth = 0,
         num_heads_kv=None,
         cross_attn=False,
         qkv_proj_bias=True,
@@ -479,6 +484,7 @@ class MHA(nn.Module):
         wqkv_cls = linear_cls if not self.return_residual else linear_resid_cls
         inner_attn_cls = (
             partial(FlashSelfAttention, alibi_slopes=alibi_slopes, window_size=window_size)
+            #partial(FlashDiffAttention, depth=depth, head_dim= embed_dim // num_heads )
             if use_flash_attn
             else SelfAttention
         )

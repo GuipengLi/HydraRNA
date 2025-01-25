@@ -1,4 +1,4 @@
-# HydraRNA
+NA
 HydraRNA is a full-length RNA language model. HydraRNA employs a hybrid architecture with 12 layers. Each layer contains a Hydra module except the 6th and 12th layer, which contains a MHA module. It's pre-trained on both non-coding and protien-coding RNAs. It supports as long as 10K nt of RNA sequences as input.
 
 This repository contains codes and pre-trained models for **RNA feature extraction and secondary structure prediction model**.
@@ -8,22 +8,25 @@ This repository contains codes and pre-trained models for **RNA feature extracti
 We use [fairseq](https://github.com/pytorch/fairseq) sequence modeling framework to train HydraRNA. HydraRNA is based on [Hydra](https://github.com/goombalab/hydra) and [FlashAttention](https://github.com/Dao-AILab/flash-attention). We appreciate these excellent works!
 
 
-## Create Environment and installation
-First, download the repository and create the environment.
+## Create Environment and install
+First, create the environment.
 ```
-git clone https://github.com/GuipengLi/HydraRNA
-
-cd ./HydraRNA/fairseq
-
-pip install --editable ./
-
-cd ../
-
-conda env create -f environment.yml
-```
-Then, activate the "HydraRNA" environment.
-```
+conda create -n HydraRNA python==3.9.12
 conda activate HydraRNA
+
+pip install torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1  --index-url https://download.pytorch.org/whl/cu118
+
+pip install --no-build-isolation mamba-ssm[causal-conv1d]==2.2.2
+pip install flash-attn
+
+pip install pip==24.0
+```
+
+Then, download the repository and  install it.
+```
+git clone https://github.com/GuipengLi/HydraRNA.git
+cd HydraRNA/fairseq
+pip install --editable ./
 ```
 
 ## Download the pre-trained models.
@@ -79,3 +82,4 @@ If you find these models useful, please cite our work:
 ## License
 
 This source code is licensed under the MIT license.
+
