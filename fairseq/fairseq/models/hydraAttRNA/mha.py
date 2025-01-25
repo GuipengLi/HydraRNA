@@ -10,8 +10,6 @@ from einops import rearrange, repeat
 
 from flash_attn.utils.distributed import get_dim_for_local_rank
 
-from .flashdiff2 import FlashDiffAttention
-#from .multihead_flashdiff_2x import FlashDiffAttention
 
 
 try:

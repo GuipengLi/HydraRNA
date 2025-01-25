@@ -18,9 +18,13 @@ pip install torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1  --index-url http
 
 pip install --no-build-isolation mamba-ssm[causal-conv1d]==2.2.2
 pip install flash-attn
+git clone https://github.com/Dao-AILab/flash-attention
+cd flash-attention/csrc/fused_dense_lib/ && pip install .
 
 pip install pip==24.0
 ```
+
+pip install pandas tqdm tensorboardX pysam
 
 Then, download the repository and  install it.
 ```
