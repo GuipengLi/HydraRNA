@@ -22,9 +22,10 @@ git clone https://github.com/Dao-AILab/flash-attention
 cd flash-attention/csrc/fused_dense_lib/ && pip install .
 
 pip install pip==24.0
-```
 
 pip install pandas tqdm tensorboardX pysam
+```
+
 
 Then, download the repository and  install it.
 ```
