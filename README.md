@@ -9,7 +9,7 @@ We use [fairseq](https://github.com/pytorch/fairseq) sequence modeling framework
 
 
 ## Create Environment and install
-First, create the environment.
+First, make sure you have CUDA-11.8 installed. Then create the environment.
 ```
 conda create -n HydraRNA python==3.9.12
 conda activate HydraRNA
@@ -24,6 +24,8 @@ cd flash-attention/csrc/fused_dense_lib/ && pip install .
 pip install pip==24.0
 
 pip install pandas tqdm tensorboardX pysam
+
+pip install transformers==4.44.0
 ```
 
 
