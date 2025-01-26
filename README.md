@@ -73,7 +73,7 @@ mkdir predict
 python predict_HydraAttRNA12_RNA_SecStruct12.py
 ```
 
-We used bpRNA datasets prepared by [RiNALMo](https://github.com/lbcb-sci/RiNALMo) directly. The prediction head is also from this repository. This script will output the RNA secondary structures predicted by the HydraRNA in TS0 dataset and a summary file bpRNA_test_HydraRNA_predict_resulst_NOTallow_flexible_pairings.csv.
+We used bpRNA datasets prepared by [RiNALMo](https://github.com/lbcb-sci/RiNALMo) directly, which needs to be installed.The prediction head is also from this repository. This script will output the RNA secondary structures predicted by the HydraRNA in TS0 dataset and a summary file bpRNA_test_HydraRNA_predict_resulst_NOTallow_flexible_pairings.csv.
 
 
 ## Citations
