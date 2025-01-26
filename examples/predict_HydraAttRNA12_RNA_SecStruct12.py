@@ -10,31 +10,15 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 from tqdm import tqdm
 
-from sklearn.metrics import accuracy_score
-from torch.optim import lr_scheduler
-from sklearn.metrics import precision_recall_curve, auc, mean_squared_error
-from sklearn.metrics import precision_recall_curve, auc, roc_auc_score, average_precision_score
+from sklearn.metrics import precision_recall_curve, auc, roc_auc_score, average_precision_score, mean_squared_error
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, matthews_corrcoef
 
-from collections import defaultdict
-
-
-from sklearn.model_selection import StratifiedKFold
-import matplotlib.pyplot as plt
-
-
-from sklearn.metrics import accuracy_score
-from sklearn.metrics import f1_score
 from scipy.stats import spearmanr, pearsonr
-
-from torch.nn.utils.weight_norm import weight_norm
 
 from fairseq import checkpoint_utils, data, options, tasks
 from fairseq.data.data_utils import collate_tokens
 
-
 from torch.amp import GradScaler
-
 
 
 
@@ -243,7 +227,6 @@ scaler = GradScaler()
 pos_weight = torch.Tensor([10]).to(device)
 criterion = nn.BCEWithLogitsLoss(pos_weight = pos_weight)
 
-learning_rate = 0.0001
 
 
 def contact2ct(contact, seq):
