@@ -8,13 +8,10 @@ from sklearn import metrics
 
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 from tqdm import tqdm
-from transformers import ElectraModel, ElectraConfig
-from transformers import AutoTokenizer
-from transformers import EsmModel, EsmTokenizer, EsmConfig
-from sklearn.metrics import accuracy_score
-from torch.optim import lr_scheduler
+
+
 from sklearn.metrics import precision_recall_curve, auc, mean_squared_error
-import matplotlib.pyplot as plt
+
 import torch
 import torch.nn as nn
 import torch.nn.init as init
@@ -24,16 +21,12 @@ from scipy.stats import spearmanr, pearsonr
 
 from sklearn import preprocessing
 
-from torch.nn.utils.weight_norm import weight_norm
-
 from fairseq import checkpoint_utils, data, options, tasks
 from fairseq.data.data_utils import collate_tokens
 
 from torch.amp import GradScaler
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-from sklearn.model_selection import train_test_split
 
 
 path='../weights/HydraRNA_model.pt' # change the path if necessary
@@ -170,7 +163,7 @@ AUC = []
 PRAUC =[]
 testSPR = []
 
-tdf = pd.read_csv('e_train.csv')
+tdf = pd.read_csv('../data/e_train.csv')
 stdscaler = preprocessing.StandardScaler()
 stdscaler.fit( np.array(tdf.rl).reshape((-1,1)) )
 
@@ -199,7 +192,7 @@ for epoch in tqdm(range(num_epochs)):
     L_train.append(TL)
     model.eval()
     PREDICT = []
-    TRUE = []
+    LABEL = []
     counter = 0
     with torch.no_grad():
         current_valid_loss = 0.0
@@ -210,13 +203,13 @@ for epoch in tqdm(range(num_epochs)):
                 loss = criterion(output, Z.unsqueeze(1).float().to(device))
             current_valid_loss += loss.item()
             PREDICT.extend(output.cpu().numpy())
-            TRUE.extend(Z.cpu().numpy())
+            LABEL.extend(Z.cpu().numpy())
         T_loss = current_valid_loss / counter
         L_val.append(T_loss)
 
 
         PP = np.array(PREDICT)
-        TT = np.array(TRUE)
+        TT = np.array(LABEL)
         flattened_array1 = PP.flatten()
         flattened_array2 = TT.flatten()
         flattened_array1 = stdscaler.inverse_transform(flattened_array1.reshape((-1,1)) )
@@ -235,15 +228,15 @@ for epoch in tqdm(range(num_epochs)):
         PRAUC.append(corr)
 
     PREDICT =[]
-    TRUE=[]
+    LABEL=[]
     with torch.no_grad():
         for SEQ, Z in test_loader:
             with torch.autocast(device_type='cuda', dtype=torch.float16):
                 output = model(SEQ.to(device) ).float()
             PREDICT.extend(output.cpu().numpy())
-            TRUE.extend(Z.cpu().numpy())
+            LABEL.extend(Z.cpu().numpy())
     PP = np.array(PREDICT)
-    TT = np.array(TRUE)
+    TT = np.array(LABEL)
     flattened_array1 = PP.flatten()
     flattened_array2 = TT.flatten()
     flattened_array1 = stdscaler.inverse_transform(flattened_array1.reshape((-1,1)) )
