@@ -37,7 +37,7 @@ pip install --editable ./
 ```
 
 ## Download the pre-trained models.
-You can download the models from our [google drive](https://drive.google.com/drive/folders/14ZXi_aANEEdPa_Sc2cQZtUa4dENPDTkz). Then put these two pt files in the weights directory.
+You can download the models from our [google drive](https://drive.google.com/drive/folders/14ZXi_aANEEdPa_Sc2cQZtUa4dENPDTkz). Then put these pt files in the weights directory. The HydraRNA_model_V2.pt file is only for fine-tuning the RNA secondary structure prediction task. We further pre-trained the HydraRNA model based on HydraRNA_model.pt with more ncRNAs to get the HydraRNA_model_V2.pt weights.
 
 
 
@@ -73,14 +73,14 @@ mkdir predict
 python predict_HydraAttRNA12_RNA_SecStruct12.py
 ```
 
-We used bpRNA datasets prepared by [RiNALMo](https://github.com/lbcb-sci/RiNALMo) directly, which needs to be installed.The prediction head is also from this repository. This script will output the RNA secondary structures predicted by the HydraRNA in TS0 dataset and a summary file bpRNA_test_HydraRNA_predict_resulst_NOTallow_flexible_pairings.csv.
+We used bpRNA datasets prepared by [RiNALMo](https://github.com/lbcb-sci/RiNALMo) directly, which needs to be installed.The prediction head is also from this repository. This script will output the RNA secondary structures predicted by the HydraRNA in TS0 dataset and a summary file bpRNA_test_HydraRNA_predict_resulst_allow_flexible_pairings.csv.
 
 
 ## Citations
 
 If you find these models useful, please cite our work:
 
-[Li G., Jiang F., et al. HydraRNA: a hybrid architecture based full-length RNA language model. 2025.](https://github.com/GuipengLi/HydraRNA)
+[Li G., Jiang F., et al. HydraRNA: a hybrid architecture based full-length RNA language model. bioRxiv 2025.](https://www.biorxiv.org/content/10.1101/2025.03.06.641765v1.full)
 
 
 
