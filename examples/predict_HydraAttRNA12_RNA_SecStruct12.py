@@ -1,4 +1,3 @@
-from torch.utils.data import Dataset, Subset
 import os
 import sys
 from pathlib import Path
@@ -9,17 +8,13 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 from tqdm import tqdm
-
-from sklearn.metrics import precision_recall_curve, auc, roc_auc_score, average_precision_score, mean_squared_error
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, matthews_corrcoef
-
-from scipy.stats import spearmanr, pearsonr
 
 from fairseq import checkpoint_utils, data, options, tasks
 from fairseq.data.data_utils import collate_tokens
 
-from torch.amp import GradScaler
-
+from rinalmo.utils.sec_struct import parse_sec_struct_file
+from rinalmo.utils.sec_struct import prob_mat_to_sec_struct, ss_precision, ss_recall, ss_f1, save_to_ct
 
 
 def _outer_concat(t1: torch.Tensor, t2: torch.Tensor):
@@ -99,13 +94,15 @@ class SecStructPredictionHead(nn.Module):
 parser = options.get_generation_parser(default_task='masked_lm_span')
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+from fairseq.models import build_model
+from argparse import Namespace
+cfg = Namespace( arch="HydraAttRNA12" )
 
-path='../weights/HydraRNA_model.pt' # change the path if necessary
-args = options.parse_args_and_arch(parser,  ['../dict/'])
+
+args = options.parse_args_and_arch(parser, ['../dict/'])
 
 # Setup task
 task = tasks.setup_task(args)
-print('| loading model from {}'.format(path))
 
 seed = 42
 torch.manual_seed(seed)
@@ -115,16 +112,7 @@ input_dim = 1024
 hidden_dim = 128
 output_dim = 2
 
-num_epochs = 20
-
 batch_size = 1
-accumulation_steps = 4
-
-MODEL = 'finetune_HydraAttRNA12_RNASecStruct12'
-
-
-from rinalmo.utils.sec_struct import parse_sec_struct_file
-from rinalmo.utils.sec_struct import prob_mat_to_sec_struct, ss_precision, ss_recall, ss_f1, save_to_ct
 
 
 class SecondaryStructureDataset(Dataset):
@@ -154,12 +142,11 @@ class SecondaryStructureDataset(Dataset):
     def __getitem__(self, idx):
         ss_id = self.ss_paths[idx].stem
         seq, sec_struct = parse_sec_struct_file(self.ss_paths[idx])
+        seq = seq.upper().replace('U','T')
 
-        #seq_encoded = torch.tensor(self.alphabet.encode(seq), dtype=torch.int64)
         chars = '<s> ' + ' '.join(list(seq))
         seq_encoded = task.source_dictionary.encode_line( chars,  add_if_not_exist=False )
         sec_struct = torch.tensor(sec_struct)
-        #return ss_id, seq, seq_encoded, sec_struct
         #return  seq, seq_encoded, sec_struct
         return  seq, seq_encoded, sec_struct, ss_id
 
@@ -177,29 +164,6 @@ def my_collate(batch):
     return [ pad_tokens, target]
 
 
-def acc_f1_mcc_auc_aupr_pre_rec(preds, labels, probs):
-    acc = accuracy_score(labels, preds)
-    precision = precision_score(y_true=labels, y_pred=preds)
-    recall = recall_score(y_true=labels, y_pred=preds)
-    f1 = f1_score(y_true=labels, y_pred=preds)
-    mcc = matthews_corrcoef(labels, preds)
-    auc = roc_auc_score(labels, probs)
-    aupr = average_precision_score(labels, probs)
-    return {
-        "acc": acc,
-        "auc": auc,
-        "aupr": aupr,
-        "f1": f1,
-        "mcc": mcc,
-        "precision": precision,
-        "recall": recall,
-    }
-
-
-eval_summary = [] #cell, fold, acc, auc, auprc, f1, mcc, prec, recall
-
-
-
 class hybridSecStruct(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
         super(hybridSecStruct, self).__init__()
@@ -207,27 +171,14 @@ class hybridSecStruct(nn.Module):
         self.dropout = nn.Dropout( 0.1)
         self.threshold = 0.1
 
-        self.hybrid = models[0].encoder
-        self.ss_head = SecStructPredictionHead( input_dim, 12 ) 
+        self.hybrid = build_model(cfg, task).encoder
+        self.ss_head = SecStructPredictionHead( input_dim, 2, conv_dim=64, kernel_size=3 ) 
 
     def forward(self, src_tokens): # input token ids
         #print( src_tokens.shape) #  B x L
         x = self.hybrid( src_tokens, features_only=True)[0]
-        x = self.dropout(x)
         logits = self.ss_head(x[..., 1:-1,:] ).squeeze(-1)
         return logits
-
-
-
-scaler = GradScaler()
-
-#print(model)
-
-
-pos_weight = torch.Tensor([10]).to(device)
-criterion = nn.BCEWithLogitsLoss(pos_weight = pos_weight)
-
-
 
 def contact2ct(contact, seq):
     seq_len = len(seq)
@@ -252,26 +203,15 @@ def contact2ct(contact, seq):
     df['n'] = last_col
     return df
 
-
-L_train = []
-L_val =[]
-AUC = []
-PRAUC =[]
-testSPR = []
-
-
 test_list = ['bpRNA']
-
 
 for celldir in test_list:
     celltype= celldir
     ds_test = SecondaryStructureDataset('../data/bpRNA/test') 
     print(celltype)
     
-    #valid_loader = DataLoader(ds_valid, shuffle=False, batch_size=1)
     test_loader = DataLoader(ds_test, shuffle=False, batch_size=1)
-
-    models, _model_args = checkpoint_utils.load_model_ensemble([path], task=task)
+    
     model =  hybridSecStruct( input_dim, hidden_dim, output_dim)
     model.load_state_dict(torch.load("../weights/HydraRNA_SS_model.pt"))
  
@@ -280,9 +220,7 @@ for celldir in test_list:
     num_params = sum(param.numel() for param in model.parameters())
     print('Number of parameters: %d'%(num_params) )
 
-
-    bestbest_threshold = 0.5
-    bestbest_val = 0
+    bestbest_threshold =  0.02
     num_epochs = 1
     for epoch in tqdm(range(num_epochs)):
 
@@ -292,46 +230,35 @@ for celldir in test_list:
         test_f1 = []
         test_precision = []
         test_recall = []
-        current_test_loss = 0.0
         with torch.no_grad():
             for seq, data, label,ss_id in tqdm(test_loader):  # seq is a list of sequence, with len==batch_size==1
                 seq_list.append(seq[0])
                 fpath_list.append( ss_id[0] )
-                #print( ss_id[0])
                 counter += 1
                 with torch.autocast(device_type='cuda', dtype=torch.float16):
                     logits = model(data.to(device) ).float()
                     seq_len = label.shape[1]
                     upper_tri_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=logits.device), diagonal=1)
-                    loss = criterion(logits[..., upper_tri_mask], label.to(device)[..., upper_tri_mask])
-                current_test_loss += loss.item()
+
                 probs = torch.sigmoid(logits).cpu().numpy()
-                #print(probs.shape, len(seq))
-                #print (probs.min(), probs.mean(), probs.max())
                 sec_struct_pred = prob_mat_to_sec_struct(probs=probs[0], seq=seq[0], threshold= bestbest_threshold)
-                f1 = ss_f1( label[0], sec_struct_pred, allow_flexible_pairings=False)
+                f1 = ss_f1( label[0], sec_struct_pred, allow_flexible_pairings=True)
                 test_f1.append( f1 )
-                prec = ss_precision( label[0], sec_struct_pred, allow_flexible_pairings=False)
+                prec = ss_precision( label[0], sec_struct_pred, allow_flexible_pairings=True)
                 test_precision.append( prec )
-                reca = ss_recall( label[0], sec_struct_pred, allow_flexible_pairings=False)
+                reca = ss_recall( label[0], sec_struct_pred, allow_flexible_pairings=True)
                 test_recall.append( reca )
-                #print( loss.item(), f1 )
-                #if counter > 20:
-                #    break
                 ct = contact2ct(sec_struct_pred, seq[0])
-                #print(ct)
-                ct.to_csv('predict/predict_HydraRNA_%s.ct'%(ss_id[0]),sep='\t',index=None,header=None)
+                ct.to_csv('predict/predict_HydraRNA_SS_%s.ct'%(ss_id[0]),sep='\t',index=None,header=None)
 
             curr_metric_test = sum(test_f1)/len(test_f1)
             curr_prec_test = sum(test_precision)/len(test_precision)
             curr_reca_test = sum(test_recall)/len(test_recall)
-            test_loss = current_test_loss / counter
 
-        print("loss_Test: ", test_loss, "F1_Test: %.4f"%curr_metric_test, "Precision_Test: %.4f"%curr_prec_test, "Recall_Test: %.4f"%curr_reca_test)
+        print("F1_Test: %.4f"%curr_metric_test, "Precision_Test: %.4f"%curr_prec_test, "Recall_Test: %.4f"%curr_reca_test)
         sys.stdout.flush()
-        with open('bpRNA_test_HydraRNA_predict_resulst_NOTallow_flexible_pairings.csv','w') as fout:
+        with open('bpRNA_test_HydraRNA_predict_resulst_allow_flexible_pairings.csv','w') as fout:
             fout.write( 'seq\tF1\tPrec\tRecall\tfile\n')
             for x,y,a,b,c in zip(seq_list, test_f1, test_precision, test_recall, fpath_list):
                 fout.write( x+'\t'+str(y)+ '\t'+str(a)+ '\t'+str(b)+ '\t'+ c +'\n')
     
-      
