@@ -9,6 +9,24 @@ We use [fairseq](https://github.com/pytorch/fairseq) sequence modeling framework
 
 
 ## Create Environment and install
+
+### Installation via Script
+
+This automated installation script is designed for Linux systems only.
+
+Prerequisites:
+
+* Ensure you have Conda installed.
+
+* Ensure there is no existing Conda environment named HydraRNA.
+
+To install, simply run:
+
+```
+./install_hydrarna_env.sh
+```
+
+### Manual Install
 First, make sure you have CUDA-11.8 installed. Then create the environment.
 ```
 conda create -n HydraRNA python==3.9.12
