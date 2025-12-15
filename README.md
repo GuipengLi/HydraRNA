@@ -1,4 +1,3 @@
-NA
 HydraRNA is a full-length RNA language model. HydraRNA employs a hybrid architecture with 12 layers. Each layer contains a Hydra module except the 6th and 12th layer, which contains a MHA module. It's pre-trained on both non-coding and protien-coding RNAs. It supports as long as 10K nt of RNA sequences as input.
 
 This repository contains codes and pre-trained models for **RNA feature extraction and secondary structure prediction model**.
@@ -98,7 +97,7 @@ We used bpRNA datasets prepared by [RiNALMo](https://github.com/lbcb-sci/RiNALMo
 
 If you find these models useful, please cite our work:
 
-[Li G., Jiang F., et al. HydraRNA: a hybrid architecture based full-length RNA language model. bioRxiv 2025.](https://www.biorxiv.org/content/10.1101/2025.03.06.641765v1.full)
+[Li G, Jiang F, Zhu J, Cui H, Wang Z, Chen W. HydraRNA: a hybrid architecture based full-length RNA language model. Genome Biol. 2025;26:383.](https://doi.org/10.1186/s13059-025-03853-7)
 
 
 
